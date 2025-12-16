@@ -18,3 +18,8 @@ db = client.get_default_database()
 
 conversations_collection = db.conversations
 messages_collection = db.messages
+
+# S12 Partner Knowledge Update Service collections
+# Database: telcenter_partner_s12
+s12_db = client.get_database("telcenter_partner_s12")
+submissions_collection = s12_db.submissions
