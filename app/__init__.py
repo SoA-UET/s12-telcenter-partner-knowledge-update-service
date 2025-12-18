@@ -4,10 +4,11 @@ service does not need HTTP API
 or WebSocket features.
 """
 
-SERVICE_NAME = "Telcenter Consultation Service" # change this
+SERVICE_NAME = "Telcenter Partner Knowledge Update Service" # change this
 
 
 
+import os
 from flask import Flask, url_for
 from flask_cors import CORS
 from flask_socketio import SocketIO
