@@ -261,25 +261,33 @@ class UpdateSubmissionService(BaseCRUDService):
         Raises:
             Exception on failure
         """
+        print(f"Creating draft update: {update_name} by {created_by}")
         # Validate update_type
         valid_update_types = ["new_entries", "modifications", "corrections"]
         if update_type not in valid_update_types:
             abort(400, f"Invalid update_type. Must be one of: {valid_update_types}")
         
+        print(f"Update type validated: {update_type}")
+
         # Validate priority
         valid_priorities = ["high", "normal", "low"]
         if priority not in valid_priorities:
             abort(400, f"Invalid priority. Must be one of: {valid_priorities}")
         
+        print(f"Priority validated: {priority}")
+
         try:
             # Step 1: Call S11 to get snapshot
             snapshot_result = self._call_s11_snapshot()
             seaweed_file_id = snapshot_result.get("seaweed_file_id")
+
+            print(f"Received seaweed_file_id: {seaweed_file_id}")
             
             if not seaweed_file_id:
                 raise Exception("S11 did not return seaweed_file_id")
             
             # Step 2: Count entries (fetch file and parse to count)
+            print(f"Fetching snapshot file from SeaweedFS: {seaweed_file_id}")
             try:
                 file_content = self._fetch_seaweed_file(seaweed_file_id)
                 data = json.loads(file_content)
@@ -288,6 +296,7 @@ class UpdateSubmissionService(BaseCRUDService):
             except Exception:
                 entry_count = 0  # Default if can't fetch/parse
             
+            print(f"Counted {entry_count} entries in snapshot")
             # Step 3: Create draft record
             now = datetime.utcnow()
             draft_doc = {
@@ -306,9 +315,14 @@ class UpdateSubmissionService(BaseCRUDService):
                 "response_at": None,
                 "result_message": None,
             }
+
+
+            print(f"Inserting draft document into database: {draft_doc}")
             
             result = self.collection.insert_one(draft_doc)
             draft_doc["_id"] = result.inserted_id
+
+            print(f"Draft update created with ID: {draft_doc['_id']}")
             
             return serialize_mongo_doc(draft_doc)
             
