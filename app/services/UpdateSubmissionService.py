@@ -73,6 +73,7 @@ class UpdateSubmissionService(BaseCRUDService):
         # Background listener thread
         self._listener_thread: Optional[threading.Thread] = None
         self._listener_started = False
+        self._listener_started_lock = threading.Lock()
     
     def _get_mq_service(self) -> MessageQueueService:
         """Get or create MessageQueueService instance (thread-safe)."""
@@ -83,32 +84,33 @@ class UpdateSubmissionService(BaseCRUDService):
     
     def _start_response_listener(self):
         """Start background thread to listen for RPC responses."""
-        if self._listener_started:
-            return
+        with self._listener_started_lock:
+            if self._listener_started:
+                return
         
-        def _listen_for_responses():
-            with self._mq_lock:
-                mq = self._get_mq_service().clone()
+            def _listen_for_responses():
+                with self._mq_lock:
+                    mq = self._get_mq_service().clone()
+                
+                mq.declare_queue(self.snapshot_responses_queue)
+                
+                def handle_response(message: dict):
+                    request_id = message.get("id")
+                    if request_id:
+                        with self._response_lock:
+                            self._pending_responses[request_id] = message
+                            if request_id in self._response_events:
+                                self._response_events[request_id].set()
+                
+                mq.register_callback(self.snapshot_responses_queue, handle_response)
+                mq.start_consuming()
             
-            mq.declare_queue(self.snapshot_responses_queue)
-            
-            def handle_response(message: dict):
-                request_id = message.get("id")
-                if request_id:
-                    with self._response_lock:
-                        self._pending_responses[request_id] = message
-                        if request_id in self._response_events:
-                            self._response_events[request_id].set()
-            
-            mq.register_callback(self.snapshot_responses_queue, handle_response)
-            mq.start_consuming()
-        
-        self._listener_thread = threading.Thread(
-            target=_listen_for_responses, 
-            daemon=True
-        )
-        self._listener_thread.start()
-        self._listener_started = True
+            self._listener_thread = threading.Thread(
+                target=_listen_for_responses, 
+                daemon=True
+            )
+            self._listener_thread.start()
+            self._listener_started = True
     
     def _call_s11_snapshot(self, timeout: float = 30.0) -> dict:
         """
@@ -120,14 +122,17 @@ class UpdateSubmissionService(BaseCRUDService):
         Raises:
             Exception on failure
         """
+        print(f"Calling S11 for snapshot with timeout {timeout} seconds")
         self._start_response_listener()
         
         request_id = str(uuid.uuid4())
         
+        print(f"Generated request ID: {request_id}")
         # Create event for this request
         with self._response_lock:
             self._response_events[request_id] = threading.Event()
         
+        print(f"Building snapshot request to S11")
         # Send RPC request to S11
         request_message = {
             "method": "snapshot",
@@ -135,32 +140,46 @@ class UpdateSubmissionService(BaseCRUDService):
             "id": request_id
         }
         
+        print(f"Cloning MQ service to send request")
         with self._mq_lock:
             mq = self._get_mq_service().clone()
+        
+        print(f"Declaring queue and publishing message")
         mq.declare_queue(self.snapshot_requests_queue)
+        print(f"Publishing snapshot request message to queue {self.snapshot_requests_queue}")
         mq.publish_message(self.snapshot_requests_queue, request_message)
         
         # Wait for response
         event = self._response_events[request_id]
+        print(f"Waiting for response from S11 for request ID: {request_id}")
         if not event.wait(timeout=timeout):
             # Cleanup
+            print(f"Timeout waiting for response from S11 for request ID: {request_id}")
             with self._response_lock:
                 self._response_events.pop(request_id, None)
                 self._pending_responses.pop(request_id, None)
             raise TimeoutError("Timeout waiting for S11 snapshot response")
         
         # Get response
+        print(f"Entering lock to retrieve response for request ID: {request_id}")
         with self._response_lock:
             response = self._pending_responses.pop(request_id, None)
+            print(f"Response received: {response}")
             self._response_events.pop(request_id, None)
         
+        print(f"Processing response from S11", response)
         if not response:
             raise Exception("No response received from S11")
         
+        print(f"Checking response result status")
         result = response.get("result", {})
+        print(f"Response result: {result}")
         if result.get("status") != "success":
             error_content = result.get("content", "Unknown error")
+            print(f"S11 snapshot failed with error: {error_content}")
             raise Exception(f"S11 snapshot failed: {error_content}")
+        
+        print(f"S11 snapshot successful, returning content", result.get("content", {}))
         
         return result.get("content", {})
     
