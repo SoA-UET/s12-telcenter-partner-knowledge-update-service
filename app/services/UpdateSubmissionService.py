@@ -61,10 +61,6 @@ class UpdateSubmissionService(BaseCRUDService):
         )
         self.partner_id = os.getenv("PARTNER_ID", "default_partner")
         
-        # MessageQueueService instance and lock for thread safety
-        self._mq_service: Optional[MessageQueueService] = None
-        self._mq_lock = threading.Lock()
-        
         # Pending RPC responses storage
         self._pending_responses: dict[str, Any] = {}
         self._response_events: dict[str, threading.Event] = {}
@@ -75,13 +71,6 @@ class UpdateSubmissionService(BaseCRUDService):
         self._listener_started = False
         self._listener_started_lock = threading.Lock()
     
-    def _get_mq_service(self) -> MessageQueueService:
-        """Get or create MessageQueueService instance (thread-safe)."""
-        with self._mq_lock:
-            if self._mq_service is None:
-                self._mq_service = MessageQueueService()
-            return self._mq_service
-    
     def _start_response_listener(self):
         """Start background thread to listen for RPC responses."""
         with self._listener_started_lock:
@@ -89,8 +78,7 @@ class UpdateSubmissionService(BaseCRUDService):
                 return
         
             def _listen_for_responses():
-                with self._mq_lock:
-                    mq = self._get_mq_service().clone()
+                mq = MessageQueueService()
                 
                 mq.declare_queue(self.snapshot_responses_queue)
                 
@@ -141,8 +129,7 @@ class UpdateSubmissionService(BaseCRUDService):
         }
         
         print(f"Cloning MQ service to send request")
-        with self._mq_lock:
-            mq = self._get_mq_service().clone()
+        mq = MessageQueueService()
         
         print(f"Declaring queue and publishing message")
         mq.declare_queue(self.snapshot_requests_queue)
@@ -185,8 +172,7 @@ class UpdateSubmissionService(BaseCRUDService):
     
     def _send_a34_event(self, event_type: str, data: dict):
         """Send event to S05 via A34 (fire-and-forget)."""
-        with self._mq_lock:
-            mq = self._get_mq_service().clone()
+        mq = MessageQueueService()
         
         mq.declare_queue(self.update_validation_event_queue)
         
