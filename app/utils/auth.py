@@ -231,9 +231,7 @@ def verify_jwt_token(token: str) -> dict:
         
     except jwt.ExpiredSignatureError:
         raise ValueError("Token has expired")
-    except jwt.InvalidIatError:
-        raise ValueError("Invalid iat claim")
-    except jwt.InvalidTokenError as e:
+    except jwt.PyJWTError as e:
         raise ValueError(f"Invalid token: {str(e)}")
 
 
