@@ -298,7 +298,8 @@ class UpdateSubmissionService(BaseCRUDService):
                 data = json.loads(file_content)
                 # Count packages and FAQs
                 entry_count = len(data.get("packages", [])) + len(data.get("faqs", []))
-            except Exception:
+            except Exception as e:
+                print(f"Error fetching/parsing snapshot file: {str(e)}")
                 entry_count = 0  # Default if can't fetch/parse
             
             print(f"Counted {entry_count} entries in snapshot")
